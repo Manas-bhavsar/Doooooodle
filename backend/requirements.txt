@@ -1,0 +1,13 @@
+Flask>=3.0,<4
+flask-cors>=4.0,<5
+Pillow>=10,<12
+numpy>=1.26,<3
+opencv-python>=4.9,<5
+paddleocr>=2.8,<3
+paddlepaddle>=2.6,<3
+transformers>=4.46,<5
+datasets>=3.0,<4
+accelerate>=1.0,<2
+evaluate>=0.4,<1
+jiwer>=3.0,<4
+pandas>=2.2,<3
