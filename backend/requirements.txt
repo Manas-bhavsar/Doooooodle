@@ -1,6 +1,7 @@
 Flask>=3.0,<4
 flask-cors>=4.0,<5
 Pillow>=10,<12
+pypdfium2>=4,<6
 numpy>=1.26,<3
 opencv-python>=4.9,<5
 paddleocr>=2.8,<3

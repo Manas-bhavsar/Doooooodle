@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
+import pypdfium2 as pdfium
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from PIL import Image
@@ -21,6 +22,19 @@ UPLOADS.mkdir(exist_ok=True)
 app = Flask(__name__)
 CORS(app)
 init_db()
+
+
+def pages_from_upload(upload):
+    if upload.filename.lower().endswith(".pdf") or upload.mimetype == "application/pdf":
+        try:
+            doc = pdfium.PdfDocument(upload.stream.read())
+        except pdfium.PdfiumError:
+            return None
+        return [page.render(scale=200 / 72).to_pil() for page in doc]
+    try:
+        return [Image.open(upload.stream)]
+    except OSError:
+        return None
 
 
 def note_row(row):
@@ -48,26 +62,37 @@ def notes():
 def create_note():
     upload = request.files.get("scan")
     if not upload or not upload.filename:
-        return {"error": "Attach a scan image."}, 400
-    try:
-        image = clean_page(Image.open(upload.stream))
-    except OSError:
-        return {"error": "The upload must be an image."}, 400
-    filename = f"{uuid4().hex}.png"
-    image.save(UPLOADS / filename)
-    try:
-        lines = transcribe(image)
-    except ModelUnavailable as exc:
-        (UPLOADS / filename).unlink(missing_ok=True)
-        return {"error": str(exc)}, 503
-    title = request.form.get("title") or (lines[0][:60] if lines else "Untitled note")
+        return {"error": "Attach a scan image or PDF."}, 400
+    pages = pages_from_upload(upload)
+    if not pages:
+        return {"error": "The upload must be an image or PDF."}, 400
+    title = request.form.get("title")
     scan_date = request.form.get("scan_date") or date.today().isoformat()
+    subject, topic = request.form.get("subject", ""), request.form.get("topic", "")
+    created_ids = []
+    for index, page in enumerate(pages):
+        image = clean_page(page)
+        filename = f"{uuid4().hex}.png"
+        image.save(UPLOADS / filename)
+        try:
+            lines = transcribe(image)
+        except ModelUnavailable as exc:
+            (UPLOADS / filename).unlink(missing_ok=True)
+            if not created_ids:
+                return {"error": str(exc)}, 503
+            break  # keep the pages already saved; stop scanning the rest of this PDF
+        page_title = title or (lines[0][:60] if lines else "Untitled note")
+        offset = index * 40  # stagger multi-page PDFs so pages don't stack exactly on top of each other
+        with connect() as db:
+            cursor = db.execute("INSERT INTO notes(title, scan_date, subject, topic, image_path, canvas_x, canvas_y) VALUES(?,?,?,?,?,?,?)", (page_title, scan_date, subject, topic, filename, 80 + offset, 80 + offset))
+            note_id = cursor.lastrowid
+            db.executemany("INSERT INTO blocks(note_id, content, block_order) VALUES(?,?,?)", [(note_id, line, index) for index, line in enumerate(lines)])
+        created_ids.append(note_id)
+    if not created_ids:
+        return {"error": "No pages could be processed."}, 503
     with connect() as db:
-        cursor = db.execute("INSERT INTO notes(title, scan_date, subject, topic, image_path) VALUES(?,?,?,?,?)", (title, scan_date, request.form.get("subject", ""), request.form.get("topic", ""), filename))
-        note_id = cursor.lastrowid
-        db.executemany("INSERT INTO blocks(note_id, content, block_order) VALUES(?,?,?)", [(note_id, line, index) for index, line in enumerate(lines)])
-        row = db.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone()
-    return jsonify(note_row(row)), 201
+        rows = [db.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone() for note_id in created_ids]
+    return jsonify([note_row(row) for row in rows]), 201
 
 
 @app.patch("/notes/<int:note_id>")
