@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("USE_TF", "0")  # broken/unused TF install crashes transformers' backend auto-detect
+
+import torch  # noqa: F401  must load before paddleocr: paddleocr pulls torch in transitively via
+# albumentations, and if paddle's DLL search path gets set up first, that later torch import fails
+# with "WinError 127" on torch/lib/shm.dll. Importing torch here first avoids the conflict entirely.
+
 from functools import lru_cache
 from pathlib import Path
 
@@ -16,19 +24,26 @@ def clean_page(image: Image.Image) -> Image.Image:
     return ImageEnhance.Contrast(image).enhance(1.5)
 
 
+BASE_MODEL = "microsoft/trocr-small-handwritten"
+
+
 @lru_cache(maxsize=1)
 def recognizer():
     try:
         import torch
         from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-        path = str(Path(__file__).parent / "models" / "trocr-custom")
-        processor = TrOCRProcessor.from_pretrained(path)
-        model = VisionEncoderDecoderModel.from_pretrained(path)
+        custom = Path(__file__).parent / "models" / "trocr-custom"
+        # Fine-tune with backend/training/train.py on your own note manifests to specialize this;
+        # microsoft/trocr-small-handwritten alone already scores ~6% CER on IAM (see DATASET_PROTOCOL.md
+        # on why re-training it on IAM itself made accuracy worse, not better).
+        source = str(custom) if custom.exists() else BASE_MODEL
+        processor = TrOCRProcessor.from_pretrained(source)
+        model = VisionEncoderDecoderModel.from_pretrained(source)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model.to(device).eval()
         return processor, model, device
     except Exception as exc:
-        raise ModelUnavailable("Custom model missing. Train it with backend/training/train.py before scanning notes.") from exc
+        raise ModelUnavailable("Handwriting model failed to load. Install backend requirements.") from exc
 
 
 @lru_cache(maxsize=1)

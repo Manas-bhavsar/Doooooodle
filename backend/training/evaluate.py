@@ -1,6 +1,10 @@
 """Report held-out CER/WER for the fine-tuned TrOCR model."""
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("USE_TF", "0")  # broken/unused TF install crashes transformers' backend auto-detect
+
 import argparse
 import json
 from datetime import datetime

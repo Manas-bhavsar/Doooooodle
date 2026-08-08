@@ -9,3 +9,4 @@ backend/models/trocr-custom/
 backend/reports/*.json
 backend/reports/*.png
 tmp/
+tmp_*.log
