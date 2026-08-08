@@ -6,6 +6,7 @@ frontend/.next/
 backend/data/
 backend/uploads/
 backend/models/trocr-custom/
+backend/runs/
 backend/reports/*.json
 backend/reports/*.png
 tmp/

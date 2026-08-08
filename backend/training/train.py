@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from datasets import load_dataset
 from PIL import Image
 from transformers import (
@@ -23,6 +24,21 @@ ROOT = Path(__file__).parents[1]
 BASE_MODEL = "microsoft/trocr-small-handwritten"
 
 
+class CorrectLossTrainer(Seq2SeqTrainer):
+    # transformers 4.57's automatic loss dispatch for VisionEncoderDecoderModel routes to
+    # ForCausalLMLoss (a decoder-only loss that re-shifts labels internally). Our labels are
+    # already externally shifted via shift_tokens_right, so that second shift double-misaligns
+    # logits vs labels - verified empirically: feeding the model its own greedy output back as
+    # labels reports built-in loss ~26 (near-random) when manual cross-entropy on the identical
+    # logits is ~0.02 (perfect argmax match). Compute the loss ourselves to bypass the bug.
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        # keep "labels" in the call - the model needs it internally to build decoder_input_ids
+        # via shift_tokens_right - and just ignore its (buggy) outputs.loss in favor of our own.
+        outputs = model(**inputs)
+        loss = F.cross_entropy(outputs.logits.view(-1, outputs.logits.size(-1)), inputs["labels"].view(-1), ignore_index=-100)
+        return (loss, outputs) if return_outputs else loss
+
+
 class LineDataset(torch.utils.data.Dataset):
     def __init__(self, rows, processor):
         self.rows, self.processor = rows, processor
@@ -34,7 +50,11 @@ class LineDataset(torch.utils.data.Dataset):
         source = row["image"]
         image = Image.open(source).convert("RGB") if isinstance(source, str) else source.convert("RGB")
         pixels = self.processor(image, return_tensors="pt").pixel_values.squeeze(0)
-        labels = self.processor.tokenizer(row["text"], padding="max_length", max_length=96, truncation=True).input_ids
+        # The tokenizer auto-wraps text as [bos, ...tokens, eos]. decoder_start_token_id already IS eos
+        # (see the note above) and takes the bos's role as the model's first decoder input, so a leading
+        # bos in the labels is a token the model was never pretrained to predict - drop it, or every label
+        # is off by one position for the model's entire training signal.
+        labels = self.processor.tokenizer(row["text"], padding="max_length", max_length=97, truncation=True).input_ids[1:]
         labels = [token if token != self.processor.tokenizer.pad_token_id else -100 for token in labels]
         return {"pixel_values": pixels, "labels": torch.tensor(labels)}
 
@@ -84,7 +104,7 @@ def main():
         eval_strategy="epoch" if validation_rows else "no", logging_steps=10,
         save_total_limit=2, report_to="none", remove_unused_columns=False,
     )
-    trainer = Seq2SeqTrainer(model=model, args=arguments, train_dataset=LineDataset(rows, processor), eval_dataset=LineDataset(validation_rows, processor) if validation_rows else None)
+    trainer = CorrectLossTrainer(model=model, args=arguments, train_dataset=LineDataset(rows, processor), eval_dataset=LineDataset(validation_rows, processor) if validation_rows else None)
     trainer.train()
     trainer.save_model(str(output))
     processor.save_pretrained(str(output))
