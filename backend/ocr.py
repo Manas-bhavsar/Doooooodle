@@ -50,7 +50,9 @@ def recognizer():
 def detector():
     try:
         from paddleocr import PaddleOCR
-        return PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+        import logging
+        logging.getLogger("ppocr").setLevel(logging.ERROR)
+        return PaddleOCR(lang="en")
     except Exception as exc:
         raise ModelUnavailable("PaddleOCR is unavailable. Install backend requirements.") from exc
 
