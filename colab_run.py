@@ -7,7 +7,7 @@ Replace NGROK_TOKEN below with your token from:
 https://dashboard.ngrok.com/get-started/your-authtoken
 """
 
-NGROK_TOKEN = "PASTE_YOUR_NGROK_TOKEN_HERE"
+NGROK_TOKEN = "2PI1dH0oIMU2LZmeZQxQBXymfsA_6oiJuZocJj9Cuk6m7Sp5q"
 
 # ===========================================================
 import subprocess, sys, os, time
