@@ -61,7 +61,10 @@ def transcribe(image: Image.Image) -> list[str]:
     import torch
 
     page = clean_page(image)
-    found = detector().ocr(np.asarray(page.convert("RGB")), cls=True)[0] or []
+    result = detector().ocr(np.asarray(page.convert("RGB")))
+    found = result[0] if result else []
+    if not found:
+        found = []
     processor, model, device = recognizer()
     lines = []
     for item in found:
